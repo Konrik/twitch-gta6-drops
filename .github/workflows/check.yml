@@ -11,15 +11,22 @@ jobs:
         with:
           node-version: 22
       - run: node tools/check.mjs
-      # Если файл скрипта изменился, а @version — нет, Tampermonkey у людей не обновится
-      - name: Версия поднята
+      # Если файл изменился, а его версия — нет, новая версия не дойдёт до людей:
+      # основной код — вкладки не узнают об обновлении; загрузчик — Tampermonkey его не обновит
+      - name: Версии подняты
         if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
         run: |
-          git fetch --depth=1 origin ${{ github.event.before }} || exit 0
-          if git diff --quiet ${{ github.event.before }} HEAD -- twitch-gta6-drops.user.js; then exit 0; fi
-          old=$(git show ${{ github.event.before }}:twitch-gta6-drops.user.js | grep -m1 -oP '@version\s+\K\S+')
-          new=$(grep -m1 -oP '@version\s+\K\S+' twitch-gta6-drops.user.js)
-          if [ "$old" = "$new" ]; then
-            echo "::error::Скрипт изменился, а @version осталась $new — подними её: node tools/bump.mjs X.Y"
-            exit 1
-          fi
+          before=${{ github.event.before }}
+          git fetch --depth=1 origin "$before" || exit 0
+          fail=0
+          for f in gta6-drops.core.js twitch-gta6-drops.user.js; do
+            git cat-file -e "$before:$f" 2>/dev/null || continue          # файла раньше не было
+            if git diff --quiet "$before" HEAD -- "$f"; then continue; fi
+            old=$(git show "$before:$f" | grep -m1 -oP '^//\s*@version\s+\K\S+')
+            new=$(grep -m1 -oP '^//\s*@version\s+\K\S+' "$f")
+            if [ "$old" = "$new" ]; then
+              echo "::error::$f изменился, а версия осталась $new — подними её: node tools/bump.mjs X.Y (для загрузчика: --loader X.Y)"
+              fail=1
+            fi
+          done
+          exit $fail

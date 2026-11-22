@@ -4,6 +4,14 @@ The script shows sections from this file in the "⬆ Updates" window when the la
 Heading format: `## X.Y — DD.MM.YYYY`, followed by lines that start with "-".
 The Russian version is [CHANGELOG.md](CHANGELOG.md).
 
+## 3.0 — 22.11.2026
+- Instant updates: Tampermonkey now installs a small loader, and the script itself loads from GitHub every time you open Twitch. A new version works right after you reload the page (GitHub delay up to about a minute).
+- If GitHub does not respond, a saved copy of the script runs.
+- Open tabs check for a new version every 15 minutes; watch and reward tabs restart on it by themselves.
+- ❤ Followed channels: Twitch answered "service error" to the followed channels query. Now the script tries several query variants, remembers the one that works and logs which one it is. If none works, it logs that once and retries in 30 minutes instead of every 2.
+- Log: every page load now has a reason (scheduled inventory reload, switching channel, restart on a new version) or a note "reloaded not by the script".
+- New setting "Panel opacity when not hovered" — from 50 to 100 %.
+
 ## 2.6 — 22.11.2026
 - Compact panel: buttons are icons without words (hover for a hint), all on one line.
 - The panel is semi-transparent and fades in smoothly when you hover over it.

@@ -64,32 +64,44 @@ the language that was on at that moment.
 
 ## Updates
 
-- Tampermonkey checks GitHub for a new version by itself (once a day by default) and installs it.
-- The script also checks GitHub every 6 hours. When a new version is out, a yellow
-  **"⬆ vX.Y"** button appears on the panel. Click it, then "⬆ Install", then "Update" in Tampermonkey.
-- Open auto-watch tabs restart on the new version by themselves (you can turn this off in ⚙).
-- To check by hand: click the version on the panel → "🔍 Check now".
-  Or in Tampermonkey: Dashboard → select the script → "Check for updates".
+Updates arrive **right after you reload the page**. Tampermonkey holds a small loader, and the
+loader downloads the script itself from GitHub every time you open Twitch. GitHub caches the file
+for about a minute, so a minute after a new version is out, it already works.
+
+- Open tabs check for a new version every 15 minutes. When one is out, a yellow **"⬆ vX.Y"**
+  button appears on the panel, and watch and reward tabs restart on it by themselves
+  (you can turn this off in ⚙).
+- If GitHub is down, the last working copy saved in the browser runs. If the new version on
+  GitHub turns out to be broken, the saved copy runs as well.
+- To check by hand: click the version on the panel → "🔍 Check now". The window also shows
+  where the code came from: GitHub or the saved copy.
+- The loader itself rarely changes. When a new one is out, Tampermonkey installs it by itself
+  (once a day), and the "⬆ Updates" window shows an "Update the loader" button.
 
 The changelog is in [CHANGELOG.en.md](CHANGELOG.en.md).
 
 ## Development
 
-The whole script is one file, [`twitch-gta6-drops.user.js`](twitch-gta6-drops.user.js), with no build step.
-All interface and log texts are in the `STR` dictionary (`ru` and `en` sections). When you add
-a text, add it to both sections.
+Two files, no build step:
 
-Tampermonkey updates a script only when **`@version` goes up**. So for every change:
+- [`twitch-gta6-drops.user.js`](twitch-gta6-drops.user.js) — the **loader** that goes into Tampermonkey.
+  It downloads the main code from GitHub, keeps the last working copy and runs it when GitHub is down.
+- [`gta6-drops.core.js`](gta6-drops.core.js) — the **main code**: everything the script does.
+  All interface and log texts are in the `STR` dictionary (`ru` and `en` sections). When you add
+  a text, add it to both sections.
+
+Every push to `main` reaches everyone at once. So check before you push and bump the version —
+open tabs use it to know they must restart:
 
 ```sh
-node tools/bump.mjs 2.6      # bumps the version in both places in the code, adds a section to both changelogs
+node tools/bump.mjs 3.1          # bumps the main code version, adds a section to both changelogs
 # write what changed in CHANGELOG.md and CHANGELOG.en.md
-node tools/check.mjs         # checks syntax, versions, both changelogs, update links, the dictionary
-git commit -am "2.6: ..." && git push
+node tools/check.mjs             # checks syntax, versions, both changelogs, links, the dictionary
+git commit -am "3.1: ..." && git push
 ```
 
-GitHub runs the same `check.mjs` on every push. It also fails if the script file changed but
-the version did not go up.
+If you changed the loader itself, bump its version too: `node tools/bump.mjs --loader 3.1`
+(otherwise Tampermonkey will not update it).
 
-The raw link without a commit hash always serves the latest version from the `main` branch.
-GitHub caches it for up to 5 minutes, so a new version does not show up instantly.
+GitHub runs the same `check.mjs` on every push. It also fails if a file changed but its version
+did not go up.
