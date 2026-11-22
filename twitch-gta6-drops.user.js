@@ -2,7 +2,7 @@
 // @name         Twitch GTA VI Drops — автопросмотр
 // @name:en      Twitch GTA VI Drops — auto-watch
 // @namespace    gta6-drops
-// @version      2.5
+// @version      2.6
 // @description  Держит вкладку на живом стриме GTA VI (с дропсами), сам переключает канал, если стрим закончился или стример сменил игру. Во второй вкладке — автосбор наград в инвентаре.
 // @description:en Keeps a tab on a live GTA VI stream with drops and switches channels when the stream ends or the streamer changes game. A second tab can auto-claim rewards in the inventory.
 // @homepageURL  https://github.com/Konrik/twitch-gta6-drops
@@ -59,7 +59,7 @@
   // Версия берётся из шапки скрипта (Tampermonkey), запасное значение — на всякий случай
   const VERSION = (() => {
     try { if (typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version) return GM_info.script.version; } catch (e) {}
-    return '2.5';
+    return '2.6';
   })();
   // Откуда брать обновления (raw-ссылка без хеша коммита — всегда последняя версия из ветки main)
   const REPO = 'Konrik/twitch-gta6-drops';
@@ -87,7 +87,11 @@
       // плашка и меню
       starting: 'запускаю…',
       claimTabTitle: 'Открыть сбор наград в новой вкладке',
-      stop: '⏹ Стоп',
+      stopTitle: 'Остановить скрипт в этой вкладке',
+      collapse: 'Свернуть',
+      expand: 'Нажми, чтобы развернуть',
+      closeMenu: 'Закрыть меню',
+      dragHint: '\nПлашку можно перетащить мышкой куда угодно',
       claimHere: '🎁 Собирать награды здесь',
       watchHere: '👀 Смотреть в этой вкладке',
       claimNewTab: '🎁 Награды в новой вкладке',
@@ -226,7 +230,11 @@
     en: {
       starting: 'starting…',
       claimTabTitle: 'Open reward claiming in a new tab',
-      stop: '⏹ Stop',
+      stopTitle: 'Stop the script in this tab',
+      collapse: 'Collapse',
+      expand: 'Click to expand',
+      closeMenu: 'Close menu',
+      dragHint: '\nDrag the panel with the mouse to move it anywhere',
       claimHere: '🎁 Claim rewards here',
       watchHere: '👀 Watch in this tab',
       claimNewTab: '🎁 Rewards in a new tab',
@@ -448,19 +456,151 @@
     return b;
   }
 
+  // Плашка: компактные кнопки-иконки, полупрозрачная, пока на неё не навели мышь (плавно),
+  // её можно перетащить куда угодно и свернуть до одного значка.
+  const PANEL_CSS = `
+    #gta6-panel{position:fixed;z-index:999999;display:flex;align-items:center;gap:1px;padding:3px;
+      background:#9147ff;color:#fff;font:12px/1.2 sans-serif;border-radius:8px;white-space:nowrap;
+      box-shadow:0 2px 8px rgba(0,0,0,.4);opacity:.45;transition:opacity .3s ease;
+      user-select:none;touch-action:none;cursor:grab;max-width:calc(100vw - 8px)}
+    #gta6-panel:hover,#gta6-panel.g6-drag{opacity:1}
+    #gta6-panel.g6-drag{cursor:grabbing;transition:none}
+    #gta6-panel .g6b{background:transparent;color:#fff;border:0;border-radius:5px;padding:3px 5px;margin:0;
+      font:13px/1 sans-serif;cursor:pointer;flex:none}
+    #gta6-panel .g6b:hover{background:rgba(255,255,255,.22)}
+    #gta6-panel .g6b:disabled{opacity:.5}
+    #gta6-panel .g6txt{font:700 11px/1 sans-serif;padding:4px 5px}
+    #gta6-panel .g6v{font:10px/1 sans-serif;opacity:.75;padding:4px 4px}
+    #gta6-panel .g6v.g6up{background:#ffd34d;color:#000;opacity:1;font-weight:700}
+    #gta6-panel .g6s{max-width:200px;overflow:hidden;text-overflow:ellipsis;padding:0 4px 0 2px}
+    #gta6-panel .g6sep{width:1px;height:14px;background:rgba(255,255,255,.35);margin:0 3px;flex:none}
+    #gta6-panel .g6chip{font-size:14px;padding:3px 6px}`;
+  // Пока открыто окно скрипта — плашка непрозрачная (отдельным правилом: старые браузеры не знают :has)
+  const PANEL_CSS_HOLD = 'body:has(#gta6-logs,#gta6-settings,#gta6-update) #gta6-panel{opacity:1}';
+  function ensureStyle() {
+    if (document.getElementById('gta6-style')) return;
+    const s = document.createElement('style');
+    s.id = 'gta6-style';
+    s.textContent = PANEL_CSS + '\n' + PANEL_CSS_HOLD;
+    (document.head || document.documentElement).appendChild(s);
+  }
+  function iconBtn(label, title, onClick, cls) {
+    const b = document.createElement('button');
+    b.className = 'g6b' + (cls ? ' ' + cls : '');
+    b.textContent = label;
+    if (title) b.title = title;
+    b.onclick = (e) => { e.stopPropagation(); onClick(); };
+    return b;
+  }
+  function sep() { const s = document.createElement('span'); s.className = 'g6sep'; return s; }
+
+  // ---------- положение плашки (общее для всех вкладок) ----------
+  // Храним расстояние до ближайших краёв окна, чтобы плашка «прилипала» к своему углу
+  // и при разворачивании росла внутрь экрана, а не за его край.
+  const POS_KEY = 'gta6auto_pos';
+  const MIN_KEY = 'gta6auto_min';
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  function getPos() {
+    try { const p = JSON.parse(localStorage.getItem(POS_KEY) || 'null'); if (p && p.h && p.v) return p; } catch (e) {}
+    return { h: 'left', x: 12, v: 'bottom', y: 12 };
+  }
+  function applyPos(el) {
+    if (el.classList.contains('g6-drag')) return;
+    const p = getPos();
+    const w = el.offsetWidth, hh = el.offsetHeight;
+    const x = clamp(p.x, 0, Math.max(0, innerWidth - w)), y = clamp(p.y, 0, Math.max(0, innerHeight - hh));
+    el.style.left = p.h === 'left' ? x + 'px' : 'auto';
+    el.style.right = p.h === 'right' ? x + 'px' : 'auto';
+    el.style.top = p.v === 'top' ? y + 'px' : 'auto';
+    el.style.bottom = p.v === 'bottom' ? y + 'px' : 'auto';
+  }
+  function savePos(r) {
+    const h = r.left + r.width / 2 < innerWidth / 2 ? 'left' : 'right';
+    const v = r.top + r.height / 2 < innerHeight / 2 ? 'top' : 'bottom';
+    const p = {
+      h, x: Math.round(h === 'left' ? r.left : innerWidth - r.right),
+      v, y: Math.round(v === 'top' ? r.top : innerHeight - r.bottom),
+    };
+    try { localStorage.setItem(POS_KEY, JSON.stringify(p)); } catch (e) {}
+  }
+  // Перетаскивание за любое место плашки (и за кнопки тоже: короткое нажатие — клик, сдвиг на 5+ px — перенос)
+  let justDragged = false;
+  function enableDrag(el) {
+    let st = null, moved = false;
+    // Движение мыши слушаем на всей странице: при быстром рывке курсор уходит с плашки
+    // раньше, чем мы поймём, что это перетаскивание
+    const move = (e) => {
+      if (!st) return;
+      const dx = e.clientX - st.x, dy = e.clientY - st.y;
+      if (!moved && Math.hypot(dx, dy) < 5) return;
+      if (!moved) { moved = true; el.classList.add('g6-drag'); }
+      e.preventDefault();
+      el.style.left = clamp(st.l + dx, 0, innerWidth - el.offsetWidth) + 'px';
+      el.style.top = clamp(st.t + dy, 0, innerHeight - el.offsetHeight) + 'px';
+      el.style.right = el.style.bottom = 'auto';
+      placeOpenWindow();
+    };
+    const end = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', end, true);
+      window.removeEventListener('pointercancel', end, true);
+      if (!st) return;
+      if (moved) {
+        savePos(el.getBoundingClientRect());
+        el.classList.remove('g6-drag');
+        applyPos(el);
+        placeOpenWindow();
+        justDragged = true;
+        setTimeout(() => { justDragged = false; }, 100);
+      }
+      st = null;
+    };
+    el.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const r = el.getBoundingClientRect();
+      st = { x: e.clientX, y: e.clientY, l: r.left, t: r.top };
+      moved = false;
+      window.addEventListener('pointermove', move, true);
+      window.addEventListener('pointerup', end, true);
+      window.addEventListener('pointercancel', end, true);
+    });
+    // после переноса не считаем отпускание мыши кликом по кнопке
+    el.addEventListener('click', (e) => { if (justDragged) { e.stopPropagation(); e.preventDefault(); justDragged = false; } }, true);
+  }
+
   function panel() {
     if (!document.body) return null;
+    ensureStyle();
     let el = document.getElementById('gta6-panel');
     if (!el) {
       el = document.createElement('div');
       el.id = 'gta6-panel';
-      el.style.cssText =
-        'position:fixed;bottom:12px;left:12px;z-index:999999;background:#9147ff;color:#fff;' +
-        'font:12px/1.4 sans-serif;padding:6px 8px;border-radius:6px;opacity:.95;max-width:480px;' +
-        'display:flex;align-items:center;flex-wrap:wrap;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,.4)';
       document.body.appendChild(el);
+      enableDrag(el);
     }
     return el;
+  }
+
+  // Окна (журнал, настройки, обновления) открываются рядом с плашкой, где бы она ни стояла
+  function placeWindow(box) {
+    const p = document.getElementById('gta6-panel');
+    if (!p || !box) return;
+    const r = p.getBoundingClientRect(), W = innerWidth, H = innerHeight, gap = 6;
+    Object.assign(box.style, { left: 'auto', right: 'auto', top: 'auto', bottom: 'auto', overflowY: 'auto', boxSizing: 'border-box' });
+    if (r.top + r.height / 2 > H / 2) {
+      box.style.bottom = (H - r.top + gap) + 'px';
+      box.style.maxHeight = Math.max(160, r.top - gap - 8) + 'px';
+    } else {
+      box.style.top = (r.bottom + gap) + 'px';
+      box.style.maxHeight = Math.max(160, H - r.bottom - gap - 8) + 'px';
+    }
+    const bw = box.offsetWidth;
+    if (r.left + r.width / 2 < W / 2) box.style.left = clamp(r.left, 8, Math.max(8, W - 8 - bw)) + 'px';
+    else box.style.right = clamp(W - r.right, 8, Math.max(8, W - 8 - bw)) + 'px';
+  }
+  function placeOpenWindow() {
+    const id = WINDOWS.find((w) => document.getElementById(w));
+    if (id) placeWindow(document.getElementById(id));
   }
 
   // ---------- переключение языка ----------
@@ -480,17 +620,12 @@
     if (open) { closeWindows(); WINDOW_OPENERS[open](); }
   }
   function langBtn() {
-    const b = mkBtn(tr('langBtn'), () => setLang(lang() === 'ru' ? 'en' : 'ru'));
-    b.title = tr('langBtnTitle');
-    b.style.padding = '4px 6px';
-    return b;
+    return iconBtn(tr('langBtn'), tr('langBtnTitle'), () => setLang(lang() === 'ru' ? 'en' : 'ru'), 'g6txt');
   }
 
   // ---------- окно журнала ----------
   function logBtn() {
-    const b = mkBtn('📜', toggleLogs);
-    b.title = tr('logTitle');
-    return b;
+    return iconBtn('📜', tr('logTitle'), toggleLogs);
   }
   function logText() {
     let arr = [];
@@ -568,6 +703,7 @@
     btns.appendChild(note);
     box.appendChild(title); box.appendChild(pre); box.appendChild(btns); box.appendChild(confirmRow);
     document.body.appendChild(box);
+    placeWindow(box);
     fill();
     pre.scrollTop = pre.scrollHeight;
     logRefresh = setInterval(() => { if (document.getElementById('gta6-logs')) fill(); else clearInterval(logRefresh); }, 2000);
@@ -582,9 +718,7 @@
 
   // ---------- окно настроек ----------
   function gearBtn() {
-    const g = mkBtn('⚙', toggleSettings);
-    g.title = tr('settingsTitle');
-    return g;
+    return iconBtn('⚙', tr('settingsTitle'), toggleSettings);
   }
 
   // [ключ настройки, тип, минимум]; подпись — tr('f_' + ключ)
@@ -707,6 +841,7 @@
     box.appendChild(btns);
     box.appendChild(note);
     document.body.appendChild(box);
+    placeWindow(box);
   }
 
   // ---------- обновления скрипта ----------
@@ -918,6 +1053,7 @@
     box.appendChild(title); box.appendChild(status); box.appendChild(when); box.appendChild(pre);
     box.appendChild(btns); box.appendChild(hint);
     document.body.appendChild(box);
+    placeWindow(box);
     fill();
     // Окно открыли — значит, хотят узнать сейчас; не чаще раза в минуту
     if (Date.now() - (updInfo().at || 0) > 60000 || updInfo().err) runCheck();
@@ -926,14 +1062,11 @@
   // Версия на плашке — это и есть кнопка «проверить обновления»
   function verTag() {
     const inst = newerInstalled(), onGh = newerOnGithub();
-    const b = mkBtn('v' + VERSION, toggleUpdate);
-    b.style.cssText = 'background:transparent;color:#fff;border:0;border-radius:4px;padding:2px 4px;margin-left:4px;' +
-      'font:11px sans-serif;cursor:pointer;opacity:.75';
-    b.title = tr('verTitle');
+    const b = iconBtn('v' + VERSION, tr('verTitle'), toggleUpdate, 'g6v');
     if (inst || onGh) {
-      b.textContent = inst ? tr('verRestart', inst) : `⬆ v${onGh}`;
+      b.textContent = inst ? '🔄 v' + inst : '⬆ v' + onGh;
       b.title = inst ? tr('verRestartTitle') : tr('verNewTitle');
-      b.style.cssText += ';background:#ffd34d;color:#000;opacity:1;font-weight:700';
+      b.classList.add('g6up');
     } else if (justUpdated) {
       b.textContent = '✨ v' + VERSION;
       b.title = tr('verUpdatedTitle', justUpdated);
@@ -942,47 +1075,55 @@
     return b;
   }
 
+  // Состояние вкладки одним-двумя значками: 👀✔ смотрю, 👀⏳ жду, 👀🔎 ищу, 🎁 3 — награды
+  function stateIcon() {
+    const k = tabKey && tabKey[0];
+    if (mode === 'claim') return '🎁' + (k === 'tagRewards' ? ' ' + tabKey[1] : '');
+    return '👀' + ({ tagFarm: '✔', tagWait: '⏳', tagSearch: '🔎' }[k] || '…');
+  }
+  const isMin = () => { try { return localStorage.getItem(MIN_KEY) === '1'; } catch (e) { return false; } };
+  function setMin(v) {
+    try { if (v) localStorage.setItem(MIN_KEY, '1'); else localStorage.removeItem(MIN_KEY); } catch (e) {}
+    render();
+  }
+
   function render() {
     const el = panel();
     if (!el) return;
     el.innerHTML = '';
-    if (mode) {
+    const add = (...nodes) => nodes.forEach((n) => el.appendChild(n));
+    if (mode && isMin()) {
+      // свёрнуто: только значок состояния (и ⬆, если есть обновление)
+      const status = lastStatus ? tr(...lastStatus) : tr('starting');
+      add(iconBtn(stateIcon(), 'GTA6: ' + status + '\n' + tr('expand') + tr('dragHint'), () => setMin(false), 'g6chip'));
+      if (newerInstalled() || newerOnGithub()) add(verTag());
+    } else if (mode) {
+      const status = lastStatus ? tr(...lastStatus) : tr('starting');
+      const icon = document.createElement('span');
+      icon.className = 'g6b';
+      icon.textContent = stateIcon();
+      icon.style.cursor = 'inherit';
       const t = document.createElement('span');
-      t.textContent = (mode === 'watch' ? '👀 GTA6: ' : '🎁 GTA6: ') + (lastStatus ? tr(...lastStatus) : tr('starting'));
-      el.appendChild(t);
-      if (mode === 'watch') {
-        const g = mkBtn('🎁', openClaimTab);
-        g.title = tr('claimTabTitle');
-        el.appendChild(g);
-      }
-      el.appendChild(gearBtn());
-      el.appendChild(logBtn());
-      el.appendChild(mkBtn(tr('stop'), deactivate));
-      el.appendChild(langBtn());
-      el.appendChild(verTag());
+      t.className = 'g6s';
+      t.textContent = status;
+      t.title = status + tr('dragHint');
+      add(icon, t, sep());
+      if (mode === 'watch') add(iconBtn('🎁', tr('claimTabTitle'), openClaimTab));
+      add(gearBtn(), logBtn(), iconBtn('⏹', tr('stopTitle'), deactivate), langBtn(), verTag(),
+        iconBtn('–', tr('collapse'), () => setMin(true), 'g6txt'));
     } else if (menuOpen) {
       if (location.pathname.startsWith('/drops/inventory')) {
-        el.appendChild(mkBtn(tr('claimHere'), () => activate('claim')));
-        el.appendChild(mkBtn(tr('watchHere'), () => activate('watch')));
+        add(iconBtn('🎁', tr('claimHere'), () => activate('claim')), iconBtn('👀', tr('watchHere'), () => activate('watch')));
       } else {
-        el.appendChild(mkBtn(tr('watchHere'), () => activate('watch')));
-        el.appendChild(mkBtn(tr('claimNewTab'), () => { menuOpen = false; render(); openClaimTab(); }));
+        add(iconBtn('👀', tr('watchHere'), () => activate('watch')),
+          iconBtn('🎁', tr('claimNewTab'), () => { menuOpen = false; render(); openClaimTab(); }));
       }
-      el.appendChild(gearBtn());
-      el.appendChild(logBtn());
-      el.appendChild(langBtn());
-      el.appendChild(mkBtn('✕', () => { menuOpen = false; render(); }));
-      el.appendChild(verTag());
+      add(sep(), gearBtn(), logBtn(), langBtn(), verTag(),
+        iconBtn('✕', tr('closeMenu'), () => { menuOpen = false; render(); }, 'g6txt'));
     } else {
-      const b = mkBtn('🎮 GTA6', () => { menuOpen = true; render(); });
-      b.style.marginLeft = '0';
-      b.title = tr('mainTitle');
-      el.style.padding = '4px';
-      el.appendChild(b);
-      el.appendChild(verTag());
-      return;
+      add(iconBtn('🎮 GTA6', tr('mainTitle') + tr('dragHint'), () => { menuOpen = true; render(); }, 'g6txt'), verTag());
     }
-    el.style.padding = '6px 8px';
+    applyPos(el);
   }
 
   function openClaimTab() {
@@ -1443,8 +1584,11 @@
       if (inst !== lastInst) { lastInst = inst; render(); }
       if (inst) tryUpdateReload(tr('whyOtherTab', inst));
     }, 3000);
+    // окно браузера поменяло размер — плашка и окна не должны уехать за край
+    window.addEventListener('resize', () => { const p = document.getElementById('gta6-panel'); if (p) applyPos(p); placeOpenWindow(); });
     window.addEventListener('storage', (e) => {
-      if (e.key === SEEN_KEY || e.key === UPD_KEY) render();
+      // плашку передвинули/свернули в другой вкладке
+      if (e.key === SEEN_KEY || e.key === UPD_KEY || e.key === POS_KEY || e.key === MIN_KEY) render();
       if (e.key === SEEN_KEY && newerInstalled()) tryUpdateReload(tr('whyOtherTab', newerInstalled()));
       // язык переключили в другой вкладке — переключаемся и здесь
       if (e.key === SETTINGS_KEY) {

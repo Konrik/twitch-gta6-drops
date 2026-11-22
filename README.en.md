@@ -36,17 +36,24 @@ Click "🎮 GTA6" and choose:
 
 Keep both tabs open (background is fine). You must be logged in to Twitch.
 
-Panel buttons:
+Panel buttons (hover over any of them for a hint):
 
 | Button | What it does |
 |---|---|
+| 🎁 | Open reward claiming in a new tab. |
 | ⚙ | Settings: when to switch streams, priority channels, 160p, language and more. |
 | 📜 | Event log. If something goes wrong, click "Copy" and paste the text into [Issues](https://github.com/Konrik/twitch-gta6-drops/issues). |
-| ⏹ Stop | Turn the script off in this tab. |
+| ⏹ | Turn the script off in this tab. |
 | EN / RU | Switch the language. It changes at once in all open Twitch tabs. |
 | vX.Y | The version. Click to check for updates and see what's new. |
+| – | Collapse the panel to a state icon. Click the icon to expand it again. |
 
-The tab title shows the state: 🟢 Farming, 🟡 Waiting, 🔎 Searching, 🎁 Rewards (N).
+The panel is semi-transparent and fades in when you hover over it. You can **drag it with the mouse**
+anywhere on the screen. The position is saved, and the settings and log windows open next to it.
+
+The collapsed panel shows the state: 👀✔ watching, 👀⏳ waiting (the stream ended or the game changed),
+👀🔎 searching for a stream, 🎁 N — rewards claimed. The tab title shows the same:
+🟢 Farming, 🟡 Waiting, 🔎 Searching, 🎁 Rewards (N).
 
 ## Language
 

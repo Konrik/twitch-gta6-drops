@@ -4,6 +4,12 @@ The script shows sections from this file in the "⬆ Updates" window when the la
 Heading format: `## X.Y — DD.MM.YYYY`, followed by lines that start with "-".
 The Russian version is [CHANGELOG.md](CHANGELOG.md).
 
+## 2.6 — 22.11.2026
+- Compact panel: buttons are icons without words (hover for a hint), all on one line.
+- The panel is semi-transparent and fades in smoothly when you hover over it.
+- The "–" button collapses the panel to a state icon: 👀✔ watching, 👀⏳ waiting, 👀🔎 searching, 🎁 N — rewards.
+- Drag the panel with the mouse anywhere; the position is saved. Windows open next to it.
+
 ## 2.5 — 22.11.2026
 - English language: the EN / RU button on the panel switches the whole interface and log (or ⚙ → "Language").
 - By default the language follows Twitch: Russian Twitch gives a Russian script, otherwise English.
