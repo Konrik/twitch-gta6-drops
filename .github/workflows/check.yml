@@ -1,0 +1,25 @@
+name: Проверка скрипта
+on:
+  push:
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/check.mjs
+      # Если файл скрипта изменился, а @version — нет, Tampermonkey у людей не обновится
+      - name: Версия поднята
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: |
+          git fetch --depth=1 origin ${{ github.event.before }} || exit 0
+          if git diff --quiet ${{ github.event.before }} HEAD -- twitch-gta6-drops.user.js; then exit 0; fi
+          old=$(git show ${{ github.event.before }}:twitch-gta6-drops.user.js | grep -m1 -oP '@version\s+\K\S+')
+          new=$(grep -m1 -oP '@version\s+\K\S+' twitch-gta6-drops.user.js)
+          if [ "$old" = "$new" ]; then
+            echo "::error::Скрипт изменился, а @version осталась $new — подними её: node tools/bump.mjs X.Y"
+            exit 1
+          fi
