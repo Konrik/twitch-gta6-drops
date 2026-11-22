@@ -1,16 +1,17 @@
-// Поднять версию скрипта: node tools/bump.mjs 2.5
-// Меняет @version в шапке, запасное значение в константе VERSION и добавляет раздел в CHANGELOG.md.
+// Поднять версию скрипта: node tools/bump.mjs 2.6
+// Меняет @version в шапке, запасное значение в константе VERSION
+// и добавляет раздел в CHANGELOG.md и CHANGELOG.en.md.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(root, 'twitch-gta6-drops.user.js');
-const CHANGELOG = join(root, 'CHANGELOG.md');
+const CHANGELOGS = ['CHANGELOG.md', 'CHANGELOG.en.md'];
 
 const next = process.argv[2];
 if (!/^\d+(\.\d+)+$/.test(next || '')) {
-  console.error('Укажи новую версию, например: node tools/bump.mjs 2.5');
+  console.error('Укажи новую версию, например: node tools/bump.mjs 2.6');
   process.exit(1);
 }
 
@@ -32,13 +33,15 @@ src = src.replace(/(GM_info\.script\.version;[\s\S]*?return ')[^']+(';)/, `$1${n
 if (src === before) { console.error('Не нашёл запасное значение версии в константе VERSION'); process.exit(1); }
 writeFileSync(SCRIPT, src);
 
-let log = readFileSync(CHANGELOG, 'utf8');
-if (!new RegExp(`^##\\s+v?${next.replace(/\./g, '\\.')}\\b`, 'm').test(log)) {
-  const d = new Date();
-  const date = [d.getDate(), d.getMonth() + 1].map((x) => String(x).padStart(2, '0')).join('.') + '.' + d.getFullYear();
+const d = new Date();
+const date = [d.getDate(), d.getMonth() + 1].map((x) => String(x).padStart(2, '0')).join('.') + '.' + d.getFullYear();
+for (const name of CHANGELOGS) {
+  const file = join(root, name);
+  let log = readFileSync(file, 'utf8');
+  if (new RegExp(`^##\\s+v?${next.replace(/\./g, '\\.')}\\b`, 'm').test(log)) continue;
   const at = log.search(/^##\s/m);
   const entry = `## ${next} — ${date}\n- \n\n`;
   log = at >= 0 ? log.slice(0, at) + entry + log.slice(at) : log + '\n' + entry;
-  writeFileSync(CHANGELOG, log);
+  writeFileSync(file, log);
 }
-console.log(`Версия ${cur} → ${next}. Допиши, что изменилось, в CHANGELOG.md, потом commit и push.`);
+console.log(`Версия ${cur} → ${next}. Допиши, что изменилось, в ${CHANGELOGS.join(' и ')}, потом commit и push.`);
